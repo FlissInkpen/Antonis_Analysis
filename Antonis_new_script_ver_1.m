@@ -57,33 +57,41 @@ startup
 % The pixel ratio, the number of pixels per metre. The secondary pixel ratio, assumed to be not applicable.
 % The number of tetrodes used in experiment. The number of sessions.
 %defaults of 297, 8, NaN and 6, respectively, are given
-prompt = {'Date of experiment (year, month, day)','Number of pixels per metre:',...
-    'Secondary pixel ratio','Number of tetrodes:' };
-definput = {'20160516','297','NaN','8'};
-answer = inputdlg(prompt,'Inputs',[1 44],definput);
-date= str2double(answer{1,1}); pixel_ratio=str2double(answer{2,1});
-pixel_ratio_2=str2double(answer{3,1}); tetrodes=str2double(answer{4,1});
+directory = '\\mvm-sbms-130383.bms.ed.ac.uk\frax\Fliss\Antonis\';           % define the directory where all your data and analysis code is stored
 
-data_folder = (['\\mvm-sbms-130383.bms.ed.ac.uk\frax\Fliss\Antonis\' ...    %define the data folder
-    num2str(date)]);
+[data_folder, date, pixel_ratio, pixel_ratio_2, tetrodes]...                % retrieve your starting information
+    =starting_information(directory);
 cd(data_folder);                                                            % change directory to the folder containing the relevant data
 disp(['Cluanalysis will now run on: ', pwd]);                               % Shows which directory Matlab is running in
 disp('-----------------------------------------------------------------');
+
+%Check that you have the correct number of arenas and sessions
+if arenas>1
+    if exist('merge.goal')>0
+        load('merge.goal')
+        Arenas=merge;
+        if length(Arenas)~=arenas
+            error('Please check the number of arenas used in your experiment and run the code again')
+        else
+            fprintf('Analysis done on data from %d different arenas.  ', max(Arenas))
+        end
+    else
+        error('No goal file present, please run the script again and check the number of arenas')
+    end
+else
+    fprintf('Analysis done on data from %d arena.  ', arenas)
+end
+
+
+
 tic;                                                                        % meaure how long it takes the function to run
 electrodes = length(dir('*.clu*'));                                         %define the number of electrodes from the number of items in the folder
 
 %% Inputs from question dialogue boxes %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %Is there a sleep session?
-sleep = questdlg('Is a sleep session included?', ...                        % Create a question dialogue box
-    'Sleep', '1 sleep session','Multiple sleep sessions','No','No');        % Default is no sleep sessions
-if strcmp(sleep, '1 sleep session')==1
-    disp('One Sleep session included, more information needed');            % If there is a sleep session, display this, and perform relevant analysis
-elseif strcmp(sleep, 'Multiple sleep sessions')==1
-    disp('Multiple Sleep sessions included, more information needed');      % If there are multiple sleep sessions, display this and perform relevant analysis
-else
-    disp('No sleep data to analyse');                                       % Otherwise, display 'no sleep data to analyse
-end
+sleep=sleep_question;
+
 
 %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -98,24 +106,24 @@ end
 
 
 
-        
-        
-        %limits of the field coordinates
-        limsX= [min(merge_coords(:,1)), max(merge_coords(:,1))];                    % the maximum and minimum values of the x-column of the position matrix
-        limsY= [min(merge_coords(:,2)), max(merge_coords(:,2))];                    % the minimum and maximum values of the y column of the position matrix
-        
-        %variables for making a smoothed 2 dimensional histograph / placefield
-        %diagram
-        sigma = 15;                                                                                       % sigma (gaussian standard deviation) to be used for rate and position map smoothing
-        min_dwell = 0.0001;                                                                      % total number of seconds that rat has to be in a bin for it to count
-        bin_size = 2.5; 												                        % (cm), for calculating the rate map.
-        min_dwell_distance = 5; 										                                % (cm) the distance from a point to determine minimum dwell time
-        min_dwell_time = 100; 											                                % (ms) minimum dwell time in ms for plotting rate map (should be in the multiple of 20)
-        dt_position = 20; 											                                % sampling interval of position data (ms)
-        smooth = 3; 												                                % smooth factor for guassian smoothing AKA sigma. In each script it is converted from cm to pixels.
-        
-        
-        
+
+
+%limits of the field coordinates
+limsX= [min(merge_coords(:,1)), max(merge_coords(:,1))];                    % the maximum and minimum values of the x-column of the position matrix
+limsY= [min(merge_coords(:,2)), max(merge_coords(:,2))];                    % the minimum and maximum values of the y column of the position matrix
+
+%variables for making a smoothed 2 dimensional histograph / placefield
+%diagram
+sigma = 15;                                                                                       % sigma (gaussian standard deviation) to be used for rate and position map smoothing
+min_dwell = 0.0001;                                                                      % total number of seconds that rat has to be in a bin for it to count
+bin_size = 2.5; 												                        % (cm), for calculating the rate map.
+min_dwell_distance = 5; 										                                % (cm) the distance from a point to determine minimum dwell time
+min_dwell_time = 100; 											                                % (ms) minimum dwell time in ms for plotting rate map (should be in the multiple of 20)
+dt_position = 20; 											                                % sampling interval of position data (ms)
+smooth = 3; 												                                % smooth factor for guassian smoothing AKA sigma. In each script it is converted from cm to pixels.
+
+
+
 
 %within each electrode, there will be a number of clusters
 
@@ -190,12 +198,14 @@ for i=1:electrodes
         posys(find(posys<limsY(1)|posys>limsY(2)))=NaN;                             % remove x coordinates that are outside of the maximum and minimum limits defined
         
         %Scale the bins to the pixel ratio
-        smooth_scaled = smooth /100 * pixel_ratio;                                         % scale the smoothing factor to the pixel ratio
+        smooth_scaled = smooth /100 * pixel_ratio;                                  % scale the smoothing factor to the pixel ratio
         binsize = bin_size /100 * pixel_ratio;                                      % scale the bin size to the pixel ratio
         min_dwell_dist = min_dwell_distance / 100 * pixel_ratio;                    % scale the min dwell distance to the pixel ratio
-     
-        limsx=([min(features_temp((size(features_temp,1)-2),:)), max(features_temp((size(features_temp,1)-2),:))]);
-        limsy=([min(features_temp((size(features_temp,1)-1),:)), max(features_temp((size(features_temp,1)-1),:))]);
+        
+        limsx=([min(features_temp((size(features_temp,1)-2),:)),...
+            max(features_temp((size(features_temp,1)-2),:))]);
+        limsy=([min(features_temp((size(features_temp,1)-1),:)),...
+            max(features_temp((size(features_temp,1)-1),:))]);
         % Define the number of bins
         xbins=ceil((limsx(2)-limsx(1))/binsize);
         ybins=ceil((limsy(2)-limsy(1))/binsize);
@@ -214,7 +224,7 @@ for i=1:electrodes
             if y_coord ==0
                 y_coord =1;
             end
-           test_mat_structure(y_coord,x_coord)=test_mat_structure(y_coord,x_coord)+1;
+            test_mat_structure(y_coord,x_coord)=test_mat_structure(y_coord,x_coord)+1;
         end
         
         output_structure=interp2( test_mat_structure, smooth);
@@ -225,8 +235,11 @@ for i=1:electrodes
         c.Label.String='Spiking';
         title(['Place Field Map, Cluster ',num2str(j)])
         
+        
     end
-    
+    suptitle(['Electrode ' num2str(i)])
+    suplabel('Arena X-coordinate (cm)','x');
+    suplabel('Arena Y-coordinate (cm)','y');
     
 end
 
@@ -272,42 +285,7 @@ end
 %pfield_s3_posT
 
 
-% Variables you need??
-
-%limits of the field coordinates
-limsX= [min(merge_coords(:,1)), max(merge_coords(:,1))];                    % the maximum and minimum values of the x-column of the position matrix
-limsY= [min(merge_coords(:,2)), max(merge_coords(:,2))];                    % the minimum and maximum values of the y column of the position matrix
-
-%variables for making a smoothed 2 dimensional histograph / placefield
-%diagram
-sigma = 15;                                                                                       % sigma (gaussian standard deviation) to be used for rate and position map smoothing
-min_dwell = 0.0001;                                                                      % total number of seconds that rat has to be in a bin for it to count
-bin_size = 2.5; 												                        % (cm), for calculating the rate map.
-min_dwell_distance = 5; 										                                % (cm) the distance from a point to determine minimum dwell time
-min_dwell_time = 100; 											                                % (ms) minimum dwell time in ms for plotting rate map (should be in the multiple of 20)
-dt_position = 20; 											                                % sampling interval of position data (ms)
-smooth = 3; 												                                % smooth factor for guassian smoothing AKA sigma. In each script it is converted from cm to pixels.
-
-%The positions recorded in the feature matrix
-n_features=size(features_temp,1);
-hds = features_temp(nfeatures-3,:);                                         % head direction information - irrelevant for Antonis
-posxs = features_temp(nfeatures-2,:);                                       % The x coordinates from the feature matrix
-posys = features_temp(nfeatures-1,:);                                       % The y coordinates from the feature matrix
-%remove any position data that is outside the preset limits
-posxs(find(posxs<limsX(1)|posxs>limsX(2)))=NaN;                             % remove x coordinates that are outside of the maximum and minimum limits defined
-posys(find(posys<limsY(1)|posys>limsY(2)))=NaN;                             % remove x coordinates that are outside of the maximum and minimum limits defined
-
-%Scale the bins to the pixel ratio
-smooth_scaled = smooth /100 * pixel_ratio;                                         % scale the smoothing factor to the pixel ratio
-binsize = bin_size /100 * pixel_ratio;                                      % scale the bin size to the pixel ratio
-min_dwell_dist = min_dwell_distance / 100 * pixel_ratio;                    % scale the min dwell distance to the pixel ratio
-
-
-% Define the number of bins
-xbins=ceil((limsX(2)-limsX(1))/binsize);
-ybins=ceil((limsY(2)-limsY(1))/binsize);
-
-
+% 
 
 
 
@@ -357,6 +335,21 @@ co = [0    0    1
 set(0,'DefaultAxesColorOrder',co)
 set(0,'DefaultAxesAmbientLightColor',[1 1 1])
 set(0, 'DefaultAxesBox', 'off')
+end
+function [data_folder, date, pixel_ratio, pixel_ratio_2, tetrodes]=starting_information(directory)
+prompt = {'Date of experiment (year, month, day)',...                       % define a prompt in the form of an input window
+    'Number of pixels per metre:','Secondary pixel ratio',...               % include all the necessary variables 
+    'Number of tetrodes:','Number of differently shaped arenas:', ...
+    'Number of recording sessions'};
+definput = {'20160516','297','NaN','8', '1','6'};                           % set the default inputs
+answer = inputdlg(prompt,'Inputs',[1 44],definput);                         % the output returned is a cell structure containing the answers
+%define the individual outputs
+date= str2double(answer{1,1}); pixel_ratio=str2double(answer{2,1});         % define numerically all the variables from the output cell structure
+pixel_ratio_2=str2double(answer{3,1}); tetrodes=str2double(answer{4,1});
+arenas = str2double(answer{5,1}); sessions=str2double(answer{6,1});
+
+data_folder = ([directory  num2str(date)]);                                 %define the data folder
+
 end
 function CreateFolders                                                                                                    % by Roddy %%                                                                                                                                                      %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -493,8 +486,8 @@ xlabel('Arena X-coordinate (cm)'); ylabel('Arena Y-coordinate (cm)');       % la
 hold on
 
 %Is there a sleep session?
-arena = questdlg('Define arena shape', ...                        % Create a question dialogue box
-    'arena', 'circular','square','other','circular');        % Default is circular arena
+arena = questdlg('Define arena shape', ...                                  % Create a question dialogue box
+    'arena', 'circular','square','other','circular');                       % Default is circular arena
 if strcmp(arena, 'circular')==1
     centre_coords=((max(merge_coords(:,1:2))-min(merge_coords(:,1:2)))./2)...   %define the centre of the arena
         +min(merge_coords(:,1:2));
@@ -539,8 +532,6 @@ suplabel('Arena X-coordinate (cm)','x');
 suplabel('Arena Y-coordinate (cm)','y');
 
 end
-
-
 % timeseg is the start time of each trial
 % post_all is the times the locations were sampled
 function [filenames, posx_all, posy_all, hd_all, post_all, timeseg, seg_size] = read_mypos(out_name)                    %%% Steven Huang<s.huang@ed.ac.uk> %%%
@@ -597,24 +588,18 @@ for ii=1:length(seg_size)
 end % for ii=1:length(seg_size)
 
 end
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+%Is there a sleep session?
+function sleep=sleep_question
+sleep = questdlg('Is a sleep session included?', ...                        % Create a question dialogue box
+    'Sleep', '1 sleep session','Multiple sleep sessions','No','No');        % Default is no sleep sessions
+if strcmp(sleep, '1 sleep session')==1
+    disp('One Sleep session included, more information needed');            % If there is a sleep session, display this, and perform relevant analysis
+elseif strcmp(sleep, 'Multiple sleep sessions')==1
+    disp('Multiple Sleep sessions included, more information needed');      % If there are multiple sleep sessions, display this and perform relevant analysis
+else
+    disp('No sleep data to analyse');                                       % Otherwise, display 'no sleep data to analyse
+end
+end
 
 
 
