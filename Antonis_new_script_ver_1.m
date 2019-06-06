@@ -51,7 +51,7 @@ clc
 %% Basic Inputs to the function %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % Set the figure defaults
-startup                                                                    
+startup
 
 % Manual inputs through dialogue box. This asks for four variables, identified through experimental setup and manual measurement:
 % The pixel ratio, the number of pixels per metre. The secondary pixel ratio, assumed to be not applicable.
@@ -95,6 +95,28 @@ end
 %These would want to be deifned in the inputs of the function, with
 %defaults that ran all tetrodesand all cells.
 
+
+
+
+        
+        
+        %limits of the field coordinates
+        limsX= [min(merge_coords(:,1)), max(merge_coords(:,1))];                    % the maximum and minimum values of the x-column of the position matrix
+        limsY= [min(merge_coords(:,2)), max(merge_coords(:,2))];                    % the minimum and maximum values of the y column of the position matrix
+        
+        %variables for making a smoothed 2 dimensional histograph / placefield
+        %diagram
+        sigma = 15;                                                                                       % sigma (gaussian standard deviation) to be used for rate and position map smoothing
+        min_dwell = 0.0001;                                                                      % total number of seconds that rat has to be in a bin for it to count
+        bin_size = 2.5; 												                        % (cm), for calculating the rate map.
+        min_dwell_distance = 5; 										                                % (cm) the distance from a point to determine minimum dwell time
+        min_dwell_time = 100; 											                                % (ms) minimum dwell time in ms for plotting rate map (should be in the multiple of 20)
+        dt_position = 20; 											                                % sampling interval of position data (ms)
+        smooth = 3; 												                                % smooth factor for guassian smoothing AKA sigma. In each script it is converted from cm to pixels.
+        
+        
+        
+
 %within each electrode, there will be a number of clusters
 
 for i=1:electrodes
@@ -127,8 +149,8 @@ for i=1:electrodes
         features = fscanf(fid,'%d',[nfeatures Inf]);                            % define the features by scanning the file identifier; there are 24 features for each
         fclose(fid);                                                            % close the file identifier
     end
-    fet_per_tet = (nfeatures -4) / 4;                                           %calculate the features per tetrode - the number of features analysed across the four tetrodes, minus the time and position coordinates.  
-                                                                                % Typically there are 24 features, minus the four for time and position, divided by four for the four tetrodes = 5 features per tetrode.
+    fet_per_tet = (nfeatures -4) / 4;                                           %calculate the features per tetrode - the number of features analysed across the four tetrodes, minus the time and position coordinates.
+    % Typically there are 24 features, minus the four for time and position, divided by four for the four tetrodes = 5 features per tetrode.
     num_spikes = length(features(1,:));                                         %The number of spike is equal to the number of columns of data
     disp(sprintf('\t...done'));                                                 % display 'done' - indented in the command window
     
@@ -136,17 +158,17 @@ for i=1:electrodes
     %Import the corresponding clusters data
     clusters = load(clufile);                                                   % Load the corresponding clusters data
     
-    % define the cluster index                                                                         
+    % define the cluster index
     temp=[];                                                                    % create a temp matrix
     for k=2:max(clusters)                                                       % each data point is asigned a cluster, (1, 2, 3,4,..etc) find the number of clusters
         temp(k)=length(clusters(clusters==k));                                  % define the temp variable as the length of the longest cluster
     end
     index=NaN(max(temp),max(clusters));                                         % make an empty matrix for the index, with the dimensions of the length of the longest cluster, and the width of the number of clusters
-    for j=2:max(clusters)                                                       % go through each of the clusters                             
+    for j=2:max(clusters)                                                       % go through each of the clusters
         temp=(find(clusters==j));                                               % find the indicies with that cluster number
         index(1:length(temp),j)=temp;                                           % in the index matrix, input the indicies into the corresponding column
     end
-    
+    figure
     for j=2:max(clusters)                                                       % for 1: the number of clusters (1,2,3,4... etc)
         index_temp=index(:,j);                                                  % make a temporary version of the index, with just the indicies from that cluster
         index_temp(isnan(index_temp))=[];
@@ -154,15 +176,61 @@ for i=1:electrodes
             index_temp=index_temp(1:end-1);                                     % im not sure why this has happened, so this is a quick bug fix
         end
         features_temp=features(:,index_temp);                                   % make a temporary version of the features, with only the features with the corresponding index
-        waves_temp=waves(:,:,index_temp);                                       % likewise, make a temporary version of the wave data, with only the features from the corresponding index    
+        waves_temp=waves(:,:,index_temp);                                       % likewise, make a temporary version of the wave data, with only the features from the corresponding index
         fprintf('There are %d contributions to cluster %d from electrode %d. ', size(features_temp,2),j, i);             % display the sizes of each identified cluster
-         %Whatever cluster analysis needs to be done should go here.    
+        %Whatever cluster analysis needs to be done should go here.
+        
+        %The positions recorded in the feature matrix
+        n_features=size(features_temp,1);
+        hds = features_temp(nfeatures-3,:);                                         % head direction information - irrelevant for Antonis
+        posxs = features_temp(nfeatures-2,:);                                       % The x coordinates from the feature matrix
+        posys = features_temp(nfeatures-1,:);                                       % The y coordinates from the feature matrix
+        %remove any position data that is outside the preset limits
+        posxs(find(posxs<limsX(1)|posxs>limsX(2)))=NaN;                             % remove x coordinates that are outside of the maximum and minimum limits defined
+        posys(find(posys<limsY(1)|posys>limsY(2)))=NaN;                             % remove x coordinates that are outside of the maximum and minimum limits defined
+        
+        %Scale the bins to the pixel ratio
+        smooth_scaled = smooth /100 * pixel_ratio;                                         % scale the smoothing factor to the pixel ratio
+        binsize = bin_size /100 * pixel_ratio;                                      % scale the bin size to the pixel ratio
+        min_dwell_dist = min_dwell_distance / 100 * pixel_ratio;                    % scale the min dwell distance to the pixel ratio
+     
+        limsx=([min(features_temp((size(features_temp,1)-2),:)), max(features_temp((size(features_temp,1)-2),:))]);
+        limsy=([min(features_temp((size(features_temp,1)-1),:)), max(features_temp((size(features_temp,1)-1),:))]);
+        % Define the number of bins
+        xbins=ceil((limsx(2)-limsx(1))/binsize);
+        ybins=ceil((limsy(2)-limsy(1))/binsize);
+        
+        
+        test_mat_structure=[];
+        test_mat_structure=zeros(ybins,xbins);
+        
+        for k=1:length(features_temp)
+            x_coord=round((features_temp((size(features_temp,1)-2),k)-limsx(1))./((limsx(2)-limsx(1))/xbins));
+            
+            y_coord=round((features_temp((size(features_temp,1)-1),k)-limsy(1))./((limsy(2)-limsy(1))/ybins));
+            if x_coord==0
+                x_coord=1;
+            end
+            if y_coord ==0
+                y_coord =1;
+            end
+           test_mat_structure(y_coord,x_coord)=test_mat_structure(y_coord,x_coord)+1;
+        end
+        
+        output_structure=interp2( test_mat_structure, smooth);
+        subplot(2, ceil((max(clusters)-1)/2),j-1)
+        contourf(output_structure,20, 'LineColor','none');
+        colormap('jet');
+        c=colorbar;
+        c.Label.String='Spiking';
+        title(['Place Field Map, Cluster ',num2str(j)])
+        
     end
     
     
 end
 
-% 
+%
 
 %% Spiking as a function of position to generate place fields
 
@@ -172,24 +240,24 @@ end
 %ensure computation power is sufficient
 % - you dont want to record all the time or that would take up all your RAM
 % Therefore, the presence of each column of the feature matrix corresponds
-% to one spike. 
+% to one spike.
 %We want to take the position of each spike, and create a place field
 %diagram.
 %this will be smoothed with a gaussian filter, the working parameters of
-%which are outlined in the previous code. 
+%which are outlined in the previous code.
 
 %inputs - the feature matrix for each session
 % this needs to be organised by electrode
 % You are trying to locate a place field, find out how stable it is, how
-% big it is, etc. 
+% big it is, etc.
 
 %outputs -a smoothed placefield matrix for each cluster across each session
-%figures of the place fields, in usual conventions 
+%figures of the place fields, in usual conventions
 
 %the crude position coordinates are taken at a sampling frequency of 50Hz,
 %i.e one measurement every 20ms.
 
-% the spiking data and metadata have a much higher sampling rate, 
+% the spiking data and metadata have a much higher sampling rate,
 % which only kicks in when the threshold for spiking is passed,
 %  this means that they just have a time stamp
 
@@ -207,7 +275,7 @@ end
 % Variables you need??
 
 %limits of the field coordinates
-limsX= [min(merge_coords(:,1)), max(merge_coords(:,1))];                    % the maximum and minimum values of the x-column of the position matrix 
+limsX= [min(merge_coords(:,1)), max(merge_coords(:,1))];                    % the maximum and minimum values of the x-column of the position matrix
 limsY= [min(merge_coords(:,2)), max(merge_coords(:,2))];                    % the minimum and maximum values of the y column of the position matrix
 
 %variables for making a smoothed 2 dimensional histograph / placefield
@@ -226,8 +294,8 @@ hds = features_temp(nfeatures-3,:);                                         % he
 posxs = features_temp(nfeatures-2,:);                                       % The x coordinates from the feature matrix
 posys = features_temp(nfeatures-1,:);                                       % The y coordinates from the feature matrix
 %remove any position data that is outside the preset limits
-posxs(find(posxs<limsX(1)|posxs>limsX(2)))=NaN;                             % remove x coordinates that are outside of the maximum and minimum limits defined 
-posys(find(posys<limsY(1)|posys>limsY(2)))=NaN;                             % remove x coordinates that are outside of the maximum and minimum limits defined         
+posxs(find(posxs<limsX(1)|posxs>limsX(2)))=NaN;                             % remove x coordinates that are outside of the maximum and minimum limits defined
+posys(find(posys<limsY(1)|posys>limsY(2)))=NaN;                             % remove x coordinates that are outside of the maximum and minimum limits defined
 
 %Scale the bins to the pixel ratio
 smooth_scaled = smooth /100 * pixel_ratio;                                         % scale the smoothing factor to the pixel ratio
@@ -239,13 +307,11 @@ min_dwell_dist = min_dwell_distance / 100 * pixel_ratio;                    % sc
 xbins=ceil((limsX(2)-limsX(1))/binsize);
 ybins=ceil((limsY(2)-limsY(1))/binsize);
 
-%Make a place field matrix
-Position=NaN(xbins,ybins);
 
 
 
-    
-    
+
+
 %% Outputs,
 %Master excel file, to contain inputs, in the form of .csv files, for each
 %rat, to include all data and metadata
@@ -461,10 +527,10 @@ for i =1:sessions
     hold on
     if strcmp(arena, 'circular')==1
         plot(xunit,yunit,'Color',[0.5, 0.5, 0.5],'LineWidth',6);                   % plot a circle around the data, to indicate the boundary of the arena
-else
-    disp('arena is square or otherwise');                                       % Otherwise, display 'no sleep data to analyse
-end
-
+    else
+        disp('arena is square or otherwise');                                       % Otherwise, display 'no sleep data to analyse
+    end
+    
     h=colorbar;                                              % specify the limits of the colourbar
     h.Label.String = 'Time (minutes)';
     individual_session=individual_session(session_length+1:end,:);
@@ -484,7 +550,7 @@ disp(sprintf(['Reading positions from ',posfn]));
 
 fid = fopen(posfn, 'r');
 if (fid == -1)
-        error(sprintf('\t...file not found: %s',out_name));
+    error(sprintf('\t...file not found: %s',out_name));
 end % if (fid == -1)
 [pos_all, count] = fscanf(fid,'%f', [4 inf]);
 fclose(fid);
@@ -500,7 +566,7 @@ disp(sprintf('Reading time segment information from %s...',segfn));
 
 fid = fopen(segfn,'r');
 if (fid == -1)
-        error(sprintf('\t...failed to open the time segment file.'));
+    error(sprintf('\t...failed to open the time segment file.'));
 end % if (fid == -1)
 s = textscan(fid, '%s %s');
 fclose(fid);
@@ -511,26 +577,43 @@ seg_size = zeros(1, length(timeseg));
 save('temp','post_all','timeseg');
 find(post_all==timeseg(1));
 for ii=1:length(time_index)
-        if (size(find(post_all==timeseg(ii)),1)==0)
-                error(sprintf('\tUhoh, the start time (%0.2f) of trial %i is outside the recording times.',timeseg(ii),ii));
-                [temp,index] = min(abs(post_all-timeseg(ii)));
-                error(sprintf('\tNearest recording time is.at index %i at time %0.2f.',index,post_all(index)));
-                error(sprintf('\tThe recording times before and after are at: %0.2f %0.2f.',post_all(index-1),post_all(index+1)));
-                error('\tSetting time segment value equal to nearest recorded time sampled.');
-                timeseg(ii) = post_all(index);
-        end % if (size(find(post_all==timeseg(ii)),1)==0)
-        time_index(ii) = find(post_all==timeseg(ii));
+    if (size(find(post_all==timeseg(ii)),1)==0)
+        error(sprintf('\tUhoh, the start time (%0.2f) of trial %i is outside the recording times.',timeseg(ii),ii));
+        [temp,index] = min(abs(post_all-timeseg(ii)));
+        error(sprintf('\tNearest recording time is.at index %i at time %0.2f.',index,post_all(index)));
+        error(sprintf('\tThe recording times before and after are at: %0.2f %0.2f.',post_all(index-1),post_all(index+1)));
+        error('\tSetting time segment value equal to nearest recorded time sampled.');
+        timeseg(ii) = post_all(index);
+    end % if (size(find(post_all==timeseg(ii)),1)==0)
+    time_index(ii) = find(post_all==timeseg(ii));
 end % for ii=1:length(time_index)
 
 for ii=1:length(seg_size)
-        if(ii<length(seg_size))
-                seg_size(ii) = time_index(ii+1) - time_index(ii);
-        else
-                seg_size(ii) = length(post_all) - time_index(ii) + 1;
-        end % if(ii<length(seg_size))
+    if(ii<length(seg_size))
+        seg_size(ii) = time_index(ii+1) - time_index(ii);
+    else
+        seg_size(ii) = length(post_all) - time_index(ii) + 1;
+    end % if(ii<length(seg_size))
 end % for ii=1:length(seg_size)
-  
+
 end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
