@@ -51,39 +51,47 @@ clc
 %% Basic Inputs to the function %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % Set the figure defaults
-startup                                                                    
+startup
 
 % Manual inputs through dialogue box. This asks for four variables, identified through experimental setup and manual measurement:
 % The pixel ratio, the number of pixels per metre. The secondary pixel ratio, assumed to be not applicable.
 % The number of tetrodes used in experiment. The number of sessions.
 %defaults of 297, 8, NaN and 6, respectively, are given
-prompt = {'Date of experiment (year, month, day)','Number of pixels per metre:',...
-    'Secondary pixel ratio','Number of tetrodes:' };
-definput = {'20160516','297','NaN','8'};
-answer = inputdlg(prompt,'Inputs',[1 44],definput);
-date= str2double(answer{1,1}); pixel_ratio=str2double(answer{2,1});
-pixel_ratio_2=str2double(answer{3,1}); tetrodes=str2double(answer{4,1});
+directory = '\\mvm-sbms-130383.bms.ed.ac.uk\frax\Fliss\Antonis\';           % define the directory where all your data and analysis code is stored
 
-data_folder = (['\\mvm-sbms-130383.bms.ed.ac.uk\frax\Fliss\Antonis\' ...    %define the data folder
-    num2str(date)]);
+[data_folder, date, pixel_ratio, pixel_ratio_2, tetrodes]...                % retrieve your starting information
+    =starting_information(directory);
 cd(data_folder);                                                            % change directory to the folder containing the relevant data
 disp(['Cluanalysis will now run on: ', pwd]);                               % Shows which directory Matlab is running in
 disp('-----------------------------------------------------------------');
+
+%Check that you have the correct number of arenas and sessions
+if arenas>1
+    if exist('merge.goal')>0
+        load('merge.goal')
+        Arenas=merge;
+        if length(Arenas)~=arenas
+            error('Please check the number of arenas used in your experiment and run the code again')
+        else
+            fprintf('Analysis done on data from %d different arenas.  ', max(Arenas))
+        end
+    else
+        error('No goal file present, please run the script again and check the number of arenas')
+    end
+else
+    fprintf('Analysis done on data from %d arena.  ', arenas)
+end
+
+
+
 tic;                                                                        % meaure how long it takes the function to run
 electrodes = length(dir('*.clu*'));                                         %define the number of electrodes from the number of items in the folder
 
 %% Inputs from question dialogue boxes %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 %Is there a sleep session?
-sleep = questdlg('Is a sleep session included?', ...                        % Create a question dialogue box
-    'Sleep', '1 sleep session','Multiple sleep sessions','No','No');        % Default is no sleep sessions
-if strcmp(sleep, '1 sleep session')==1
-    disp('One Sleep session included, more information needed');            % If there is a sleep session, display this, and perform relevant analysis
-elseif strcmp(sleep, 'Multiple sleep sessions')==1
-    disp('Multiple Sleep sessions included, more information needed');      % If there are multiple sleep sessions, display this and perform relevant analysis
-else
-    disp('No sleep data to analyse');                                       % Otherwise, display 'no sleep data to analyse
-end
+sleep=sleep_question;
+
 
 %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -94,6 +102,28 @@ end
 % want to be able to look at a specific tetrode, and a specific cell.,
 %These would want to be deifned in the inputs of the function, with
 %defaults that ran all tetrodesand all cells.
+
+
+
+
+
+
+%limits of the field coordinates
+limsX= [min(merge_coords(:,1)), max(merge_coords(:,1))];                    % the maximum and minimum values of the x-column of the position matrix
+limsY= [min(merge_coords(:,2)), max(merge_coords(:,2))];                    % the minimum and maximum values of the y column of the position matrix
+
+%variables for making a smoothed 2 dimensional histograph / placefield
+%diagram
+sigma = 15;                                                                                       % sigma (gaussian standard deviation) to be used for rate and position map smoothing
+min_dwell = 0.0001;                                                                      % total number of seconds that rat has to be in a bin for it to count
+bin_size = 2.5; 												                        % (cm), for calculating the rate map.
+min_dwell_distance = 5; 										                                % (cm) the distance from a point to determine minimum dwell time
+min_dwell_time = 100; 											                                % (ms) minimum dwell time in ms for plotting rate map (should be in the multiple of 20)
+dt_position = 20; 											                                % sampling interval of position data (ms)
+smooth = 3; 												                                % smooth factor for guassian smoothing AKA sigma. In each script it is converted from cm to pixels.
+
+
+
 
 %within each electrode, there will be a number of clusters
 
@@ -127,8 +157,8 @@ for i=1:electrodes
         features = fscanf(fid,'%d',[nfeatures Inf]);                            % define the features by scanning the file identifier; there are 24 features for each
         fclose(fid);                                                            % close the file identifier
     end
-    fet_per_tet = (nfeatures -4) / 4;                                           %calculate the features per tetrode - the number of features analysed across the four tetrodes, minus the time and position coordinates.  
-                                                                                % Typically there are 24 features, minus the four for time and position, divided by four for the four tetrodes = 5 features per tetrode.
+    fet_per_tet = (nfeatures -4) / 4;                                           %calculate the features per tetrode - the number of features analysed across the four tetrodes, minus the time and position coordinates.
+    % Typically there are 24 features, minus the four for time and position, divided by four for the four tetrodes = 5 features per tetrode.
     num_spikes = length(features(1,:));                                         %The number of spike is equal to the number of columns of data
     disp(sprintf('\t...done'));                                                 % display 'done' - indented in the command window
     
@@ -136,17 +166,17 @@ for i=1:electrodes
     %Import the corresponding clusters data
     clusters = load(clufile);                                                   % Load the corresponding clusters data
     
-    % define the cluster index                                                                         
+    % define the cluster index
     temp=[];                                                                    % create a temp matrix
     for k=2:max(clusters)                                                       % each data point is asigned a cluster, (1, 2, 3,4,..etc) find the number of clusters
         temp(k)=length(clusters(clusters==k));                                  % define the temp variable as the length of the longest cluster
     end
     index=NaN(max(temp),max(clusters));                                         % make an empty matrix for the index, with the dimensions of the length of the longest cluster, and the width of the number of clusters
-    for j=2:max(clusters)                                                       % go through each of the clusters                             
+    for j=2:max(clusters)                                                       % go through each of the clusters
         temp=(find(clusters==j));                                               % find the indicies with that cluster number
         index(1:length(temp),j)=temp;                                           % in the index matrix, input the indicies into the corresponding column
     end
-    
+    figure
     for j=2:max(clusters)                                                       % for 1: the number of clusters (1,2,3,4... etc)
         index_temp=index(:,j);                                                  % make a temporary version of the index, with just the indicies from that cluster
         index_temp(isnan(index_temp))=[];
@@ -154,15 +184,66 @@ for i=1:electrodes
             index_temp=index_temp(1:end-1);                                     % im not sure why this has happened, so this is a quick bug fix
         end
         features_temp=features(:,index_temp);                                   % make a temporary version of the features, with only the features with the corresponding index
-        waves_temp=waves(:,:,index_temp);                                       % likewise, make a temporary version of the wave data, with only the features from the corresponding index    
+        waves_temp=waves(:,:,index_temp);                                       % likewise, make a temporary version of the wave data, with only the features from the corresponding index
         fprintf('There are %d contributions to cluster %d from electrode %d. ', size(features_temp,2),j, i);             % display the sizes of each identified cluster
-         %Whatever cluster analysis needs to be done should go here.    
+        %Whatever cluster analysis needs to be done should go here.
+        
+        %The positions recorded in the feature matrix
+        n_features=size(features_temp,1);
+        hds = features_temp(nfeatures-3,:);                                         % head direction information - irrelevant for Antonis
+        posxs = features_temp(nfeatures-2,:);                                       % The x coordinates from the feature matrix
+        posys = features_temp(nfeatures-1,:);                                       % The y coordinates from the feature matrix
+        %remove any position data that is outside the preset limits
+        posxs(find(posxs<limsX(1)|posxs>limsX(2)))=NaN;                             % remove x coordinates that are outside of the maximum and minimum limits defined
+        posys(find(posys<limsY(1)|posys>limsY(2)))=NaN;                             % remove x coordinates that are outside of the maximum and minimum limits defined
+        
+        %Scale the bins to the pixel ratio
+        smooth_scaled = smooth /100 * pixel_ratio;                                  % scale the smoothing factor to the pixel ratio
+        binsize = bin_size /100 * pixel_ratio;                                      % scale the bin size to the pixel ratio
+        min_dwell_dist = min_dwell_distance / 100 * pixel_ratio;                    % scale the min dwell distance to the pixel ratio
+        
+        limsx=([min(features_temp((size(features_temp,1)-2),:)),...
+            max(features_temp((size(features_temp,1)-2),:))]);
+        limsy=([min(features_temp((size(features_temp,1)-1),:)),...
+            max(features_temp((size(features_temp,1)-1),:))]);
+        % Define the number of bins
+        xbins=ceil((limsx(2)-limsx(1))/binsize);
+        ybins=ceil((limsy(2)-limsy(1))/binsize);
+        
+        
+        test_mat_structure=[];
+        test_mat_structure=zeros(ybins,xbins);
+        
+        for k=1:length(features_temp)
+            x_coord=round((features_temp((size(features_temp,1)-2),k)-limsx(1))./((limsx(2)-limsx(1))/xbins));
+            
+            y_coord=round((features_temp((size(features_temp,1)-1),k)-limsy(1))./((limsy(2)-limsy(1))/ybins));
+            if x_coord==0
+                x_coord=1;
+            end
+            if y_coord ==0
+                y_coord =1;
+            end
+            test_mat_structure(y_coord,x_coord)=test_mat_structure(y_coord,x_coord)+1;
+        end
+        
+        output_structure=interp2( test_mat_structure, smooth);
+        subplot(2, ceil((max(clusters)-1)/2),j-1)
+        contourf(output_structure,20, 'LineColor','none');
+        colormap('jet');
+        c=colorbar;
+        c.Label.String='Spiking';
+        title(['Place Field Map, Cluster ',num2str(j)])
+        
+        
     end
-    
+    suptitle(['Electrode ' num2str(i)])
+    suplabel('Arena X-coordinate (cm)','x');
+    suplabel('Arena Y-coordinate (cm)','y');
     
 end
 
-% 
+%
 
 %% Spiking as a function of position to generate place fields
 
@@ -172,24 +253,24 @@ end
 %ensure computation power is sufficient
 % - you dont want to record all the time or that would take up all your RAM
 % Therefore, the presence of each column of the feature matrix corresponds
-% to one spike. 
+% to one spike.
 %We want to take the position of each spike, and create a place field
 %diagram.
 %this will be smoothed with a gaussian filter, the working parameters of
-%which are outlined in the previous code. 
+%which are outlined in the previous code.
 
 %inputs - the feature matrix for each session
 % this needs to be organised by electrode
 % You are trying to locate a place field, find out how stable it is, how
-% big it is, etc. 
+% big it is, etc.
 
 %outputs -a smoothed placefield matrix for each cluster across each session
-%figures of the place fields, in usual conventions 
+%figures of the place fields, in usual conventions
 
 %the crude position coordinates are taken at a sampling frequency of 50Hz,
 %i.e one measurement every 20ms.
 
-% the spiking data and metadata have a much higher sampling rate, 
+% the spiking data and metadata have a much higher sampling rate,
 % which only kicks in when the threshold for spiking is passed,
 %  this means that they just have a time stamp
 
@@ -204,48 +285,11 @@ end
 %pfield_s3_posT
 
 
-% Variables you need??
-
-%limits of the field coordinates
-limsX= [min(merge_coords(:,1)), max(merge_coords(:,1))];                    % the maximum and minimum values of the x-column of the position matrix 
-limsY= [min(merge_coords(:,2)), max(merge_coords(:,2))];                    % the minimum and maximum values of the y column of the position matrix
-
-%variables for making a smoothed 2 dimensional histograph / placefield
-%diagram
-sigma = 15;                                                                                       % sigma (gaussian standard deviation) to be used for rate and position map smoothing
-min_dwell = 0.0001;                                                                      % total number of seconds that rat has to be in a bin for it to count
-bin_size = 2.5; 												                        % (cm), for calculating the rate map.
-min_dwell_distance = 5; 										                                % (cm) the distance from a point to determine minimum dwell time
-min_dwell_time = 100; 											                                % (ms) minimum dwell time in ms for plotting rate map (should be in the multiple of 20)
-dt_position = 20; 											                                % sampling interval of position data (ms)
-smooth = 3; 												                                % smooth factor for guassian smoothing AKA sigma. In each script it is converted from cm to pixels.
-
-%The positions recorded in the feature matrix
-n_features=size(features_temp,1);
-hds = features_temp(nfeatures-3,:);                                         % head direction information - irrelevant for Antonis
-posxs = features_temp(nfeatures-2,:);                                       % The x coordinates from the feature matrix
-posys = features_temp(nfeatures-1,:);                                       % The y coordinates from the feature matrix
-%remove any position data that is outside the preset limits
-posxs(find(posxs<limsX(1)|posxs>limsX(2)))=NaN;                             % remove x coordinates that are outside of the maximum and minimum limits defined 
-posys(find(posys<limsY(1)|posys>limsY(2)))=NaN;                             % remove x coordinates that are outside of the maximum and minimum limits defined         
-
-%Scale the bins to the pixel ratio
-smooth_scaled = smooth /100 * pixel_ratio;                                         % scale the smoothing factor to the pixel ratio
-binsize = bin_size /100 * pixel_ratio;                                      % scale the bin size to the pixel ratio
-min_dwell_dist = min_dwell_distance / 100 * pixel_ratio;                    % scale the min dwell distance to the pixel ratio
-
-
-% Define the number of bins
-xbins=ceil((limsX(2)-limsX(1))/binsize);
-ybins=ceil((limsY(2)-limsY(1))/binsize);
-
-%Make a place field matrix
-Position=NaN(xbins,ybins);
+% 
 
 
 
-    
-    
+
 %% Outputs,
 %Master excel file, to contain inputs, in the form of .csv files, for each
 %rat, to include all data and metadata
@@ -291,6 +335,21 @@ co = [0    0    1
 set(0,'DefaultAxesColorOrder',co)
 set(0,'DefaultAxesAmbientLightColor',[1 1 1])
 set(0, 'DefaultAxesBox', 'off')
+end
+function [data_folder, date, pixel_ratio, pixel_ratio_2, tetrodes]=starting_information(directory)
+prompt = {'Date of experiment (year, month, day)',...                       % define a prompt in the form of an input window
+    'Number of pixels per metre:','Secondary pixel ratio',...               % include all the necessary variables 
+    'Number of tetrodes:','Number of differently shaped arenas:', ...
+    'Number of recording sessions'};
+definput = {'20160516','297','NaN','8', '1','6'};                           % set the default inputs
+answer = inputdlg(prompt,'Inputs',[1 44],definput);                         % the output returned is a cell structure containing the answers
+%define the individual outputs
+date= str2double(answer{1,1}); pixel_ratio=str2double(answer{2,1});         % define numerically all the variables from the output cell structure
+pixel_ratio_2=str2double(answer{3,1}); tetrodes=str2double(answer{4,1});
+arenas = str2double(answer{5,1}); sessions=str2double(answer{6,1});
+
+data_folder = ([directory  num2str(date)]);                                 %define the data folder
+
 end
 function CreateFolders                                                                                                    % by Roddy %%                                                                                                                                                      %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -427,8 +486,8 @@ xlabel('Arena X-coordinate (cm)'); ylabel('Arena Y-coordinate (cm)');       % la
 hold on
 
 %Is there a sleep session?
-arena = questdlg('Define arena shape', ...                        % Create a question dialogue box
-    'arena', 'circular','square','other','circular');        % Default is circular arena
+arena = questdlg('Define arena shape', ...                                  % Create a question dialogue box
+    'arena', 'circular','square','other','circular');                       % Default is circular arena
 if strcmp(arena, 'circular')==1
     centre_coords=((max(merge_coords(:,1:2))-min(merge_coords(:,1:2)))./2)...   %define the centre of the arena
         +min(merge_coords(:,1:2));
@@ -461,10 +520,10 @@ for i =1:sessions
     hold on
     if strcmp(arena, 'circular')==1
         plot(xunit,yunit,'Color',[0.5, 0.5, 0.5],'LineWidth',6);                   % plot a circle around the data, to indicate the boundary of the arena
-else
-    disp('arena is square or otherwise');                                       % Otherwise, display 'no sleep data to analyse
-end
-
+    else
+        disp('arena is square or otherwise');                                       % Otherwise, display 'no sleep data to analyse
+    end
+    
     h=colorbar;                                              % specify the limits of the colourbar
     h.Label.String = 'Time (minutes)';
     individual_session=individual_session(session_length+1:end,:);
@@ -473,8 +532,6 @@ suplabel('Arena X-coordinate (cm)','x');
 suplabel('Arena Y-coordinate (cm)','y');
 
 end
-
-
 % timeseg is the start time of each trial
 % post_all is the times the locations were sampled
 function [filenames, posx_all, posy_all, hd_all, post_all, timeseg, seg_size] = read_mypos(out_name)                    %%% Steven Huang<s.huang@ed.ac.uk> %%%
@@ -484,7 +541,7 @@ disp(sprintf(['Reading positions from ',posfn]));
 
 fid = fopen(posfn, 'r');
 if (fid == -1)
-        error(sprintf('\t...file not found: %s',out_name));
+    error(sprintf('\t...file not found: %s',out_name));
 end % if (fid == -1)
 [pos_all, count] = fscanf(fid,'%f', [4 inf]);
 fclose(fid);
@@ -500,7 +557,7 @@ disp(sprintf('Reading time segment information from %s...',segfn));
 
 fid = fopen(segfn,'r');
 if (fid == -1)
-        error(sprintf('\t...failed to open the time segment file.'));
+    error(sprintf('\t...failed to open the time segment file.'));
 end % if (fid == -1)
 s = textscan(fid, '%s %s');
 fclose(fid);
@@ -511,27 +568,38 @@ seg_size = zeros(1, length(timeseg));
 save('temp','post_all','timeseg');
 find(post_all==timeseg(1));
 for ii=1:length(time_index)
-        if (size(find(post_all==timeseg(ii)),1)==0)
-                error(sprintf('\tUhoh, the start time (%0.2f) of trial %i is outside the recording times.',timeseg(ii),ii));
-                [temp,index] = min(abs(post_all-timeseg(ii)));
-                error(sprintf('\tNearest recording time is.at index %i at time %0.2f.',index,post_all(index)));
-                error(sprintf('\tThe recording times before and after are at: %0.2f %0.2f.',post_all(index-1),post_all(index+1)));
-                error('\tSetting time segment value equal to nearest recorded time sampled.');
-                timeseg(ii) = post_all(index);
-        end % if (size(find(post_all==timeseg(ii)),1)==0)
-        time_index(ii) = find(post_all==timeseg(ii));
+    if (size(find(post_all==timeseg(ii)),1)==0)
+        error(sprintf('\tUhoh, the start time (%0.2f) of trial %i is outside the recording times.',timeseg(ii),ii));
+        [temp,index] = min(abs(post_all-timeseg(ii)));
+        error(sprintf('\tNearest recording time is.at index %i at time %0.2f.',index,post_all(index)));
+        error(sprintf('\tThe recording times before and after are at: %0.2f %0.2f.',post_all(index-1),post_all(index+1)));
+        error('\tSetting time segment value equal to nearest recorded time sampled.');
+        timeseg(ii) = post_all(index);
+    end % if (size(find(post_all==timeseg(ii)),1)==0)
+    time_index(ii) = find(post_all==timeseg(ii));
 end % for ii=1:length(time_index)
 
 for ii=1:length(seg_size)
-        if(ii<length(seg_size))
-                seg_size(ii) = time_index(ii+1) - time_index(ii);
-        else
-                seg_size(ii) = length(post_all) - time_index(ii) + 1;
-        end % if(ii<length(seg_size))
+    if(ii<length(seg_size))
+        seg_size(ii) = time_index(ii+1) - time_index(ii);
+    else
+        seg_size(ii) = length(post_all) - time_index(ii) + 1;
+    end % if(ii<length(seg_size))
 end % for ii=1:length(seg_size)
-  
-end
 
+end
+%Is there a sleep session?
+function sleep=sleep_question
+sleep = questdlg('Is a sleep session included?', ...                        % Create a question dialogue box
+    'Sleep', '1 sleep session','Multiple sleep sessions','No','No');        % Default is no sleep sessions
+if strcmp(sleep, '1 sleep session')==1
+    disp('One Sleep session included, more information needed');            % If there is a sleep session, display this, and perform relevant analysis
+elseif strcmp(sleep, 'Multiple sleep sessions')==1
+    disp('Multiple Sleep sessions included, more information needed');      % If there are multiple sleep sessions, display this and perform relevant analysis
+else
+    disp('No sleep data to analyse');                                       % Otherwise, display 'no sleep data to analyse
+end
+end
 
 
 
