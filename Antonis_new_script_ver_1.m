@@ -52,20 +52,49 @@ clc
 
 % Set the figure defaults
 startup
-
+%% Mannual inputs
 % Manual inputs through dialogue box. This asks for four variables, identified through experimental setup and manual measurement:
 % The pixel ratio, the number of pixels per metre. The secondary pixel ratio, assumed to be not applicable.
 % The number of tetrodes used in experiment. The number of sessions.
 %defaults of 297, 8, NaN and 6, respectively, are given
+% user inputs the combinations of paradigms and animals (uigetfile, % questdlg, etc)
+%long term goal to automate, not a priority right now.
 directory = '\\mvm-sbms-130383.bms.ed.ac.uk\frax\Fliss\Antonis\';           % define the directory where all your data and analysis code is stored
 
-[data_folder, date, pixel_ratio, pixel_ratio_2, tetrodes]...                % retrieve your starting information
+[data_folder, date, pixel_ratio, pixel_ratio_2, tetrodes, arenas, sessions]...    % retrieve your starting information
     =starting_information(directory);
 cd(data_folder);                                                            % change directory to the folder containing the relevant data
 disp(['Cluanalysis will now run on: ', pwd]);                               % Shows which directory Matlab is running in
 disp('-----------------------------------------------------------------');
 
-%Check that you have the correct number of arenas and sessions
+
+%session_output makes a cell to collect the information from each session:
+%use filenames, electrodes, clusters, etc. 
+
+%want to make a structure of cells for each session
+%this wants to later be populated with all the information from all the
+%respective sessions. 
+session_output=[];
+for i=1:sessions
+    session_output.(['session_' (num2str(i))])={};
+end
+
+%% Find and load the set files
+[Set_Files]=set_files;
+
+%add the set files to the relevant sub structures of the sessions structure
+for i=1:sessions
+session_output.(['session_' num2str(i)]){1,1}=Set_Files.(['file_' num2str(date) num2str(i)]);
+
+end
+
+%% Find the value of the gain at each electrode in each session. 
+for i=1:sessions
+    gain_mat=gain_analysis(i, session_output);
+    session_output.(['session_' num2str(i)]){2,1}=gain_mat;
+end
+
+%% Check that you have the correct number of arenas and sessions
 if arenas>1
     if exist('merge.goal')>0
         load('merge.goal')
@@ -167,17 +196,18 @@ for i=1:electrodes
     clusters = load(clufile);                                                   % Load the corresponding clusters data
     
     % define the cluster index
+    nclu= max(clusters);                                                        % the number of clusters is defined by the largest number in the clu file
     temp=[];                                                                    % create a temp matrix
-    for k=2:max(clusters)                                                       % each data point is asigned a cluster, (1, 2, 3,4,..etc) find the number of clusters
+    for k=2:nclu                                                      % each data point is asigned a cluster, (1, 2, 3,4,..etc) find the number of clusters
         temp(k)=length(clusters(clusters==k));                                  % define the temp variable as the length of the longest cluster
     end
-    index=NaN(max(temp),max(clusters));                                         % make an empty matrix for the index, with the dimensions of the length of the longest cluster, and the width of the number of clusters
-    for j=2:max(clusters)                                                       % go through each of the clusters
+    index=NaN(max(temp),nclu);                                         % make an empty matrix for the index, with the dimensions of the length of the longest cluster, and the width of the number of clusters
+    for j=2:nclu                                                      % go through each of the clusters
         temp=(find(clusters==j));                                               % find the indicies with that cluster number
         index(1:length(temp),j)=temp;                                           % in the index matrix, input the indicies into the corresponding column
     end
     figure
-    for j=2:max(clusters)                                                       % for 1: the number of clusters (1,2,3,4... etc)
+    for j=2:nclu                                                     % for 1: the number of clusters (1,2,3,4... etc)
         index_temp=index(:,j);                                                  % make a temporary version of the index, with just the indicies from that cluster
         index_temp(isnan(index_temp))=[];
         if max(index_temp)>length(features)                                     % if you index is longer than your content, remove the last entry in the index
@@ -210,8 +240,6 @@ for i=1:electrodes
         xbins=ceil((limsx(2)-limsx(1))/binsize);
         ybins=ceil((limsy(2)-limsy(1))/binsize);
         
-        
-        test_mat_structure=[];
         test_mat_structure=zeros(ybins,xbins);
         
         for k=1:length(features_temp)
@@ -228,7 +256,7 @@ for i=1:electrodes
         end
         
         output_structure=interp2( test_mat_structure, smooth);
-        subplot(2, ceil((max(clusters)-1)/2),j-1)
+        subplot(2, ceil((nclu-1)/2),j-1)
         contourf(output_structure,20, 'LineColor','none');
         colormap('jet');
         c=colorbar;
@@ -300,10 +328,10 @@ end
 % save('Inputs/Clua_inputs.mat','date','elecs','clus','colourbar_set')
 % disp('------------------------------------');
 
-%% Mannual inputs
-% user inputs the combinations of paradigms and animals (uigetfile,
-% questdlg, etc)
-%long term goal to automate, not a priority right now.
+
+%Desired figures: both separate figures, saved as .svg and .png, and
+%compiled data types and figures in master figures, saved as png.
+
 
 
 
@@ -336,7 +364,7 @@ set(0,'DefaultAxesColorOrder',co)
 set(0,'DefaultAxesAmbientLightColor',[1 1 1])
 set(0, 'DefaultAxesBox', 'off')
 end
-function [data_folder, date, pixel_ratio, pixel_ratio_2, tetrodes]=starting_information(directory)
+function [data_folder, date, pixel_ratio, pixel_ratio_2, tetrodes, arenas, sessions]=starting_information(directory)
 prompt = {'Date of experiment (year, month, day)',...                       % define a prompt in the form of an input window
     'Number of pixels per metre:','Secondary pixel ratio',...               % include all the necessary variables 
     'Number of tetrodes:','Number of differently shaped arenas:', ...
@@ -461,7 +489,7 @@ elseif strcmp('y',whichLabel) | strcmp('yy',whichLabel)
     h=get(ax,'YLabel');
 end
 end
-function [merge_coords, time_stamp]=animal_coordinates
+function [merge_coords, time_stamp]=animal_coordinates(sessions)
 merge_coords=load('merge.mypos');                                           % load the coordinates (in x,y,z and time), as a matrix, merge_coords
 
 % remove any coordinates that are outside of the arena.
@@ -485,7 +513,7 @@ h.Label.String = 'Time (minutes)';                                          % la
 xlabel('Arena X-coordinate (cm)'); ylabel('Arena Y-coordinate (cm)');       % label the axes
 hold on
 
-%Is there a sleep session?
+
 arena = questdlg('Define arena shape', ...                                  % Create a question dialogue box
     'arena', 'circular','square','other','circular');                       % Default is circular arena
 if strcmp(arena, 'circular')==1
@@ -505,9 +533,14 @@ end
 
 
 %load the time stamps
-
 %The time segments (timestamps) merge.tseg
 time_stamp=load('merge.tseg');                                              % Load the time segments file
+if sessions~=length(time_stamp)
+    fprintf('Please examine the time stamp file. \nThe number of time segments does not match up to the number of sessions.\n')
+else
+    return
+end
+
 sessions=length(time_stamp);                                                % the number of sessions is the length of the time stamps file
 session_length=length(merge_coords)/sessions;                               % the session length is the length of the coordinates file, divided by the number of the sessions
 individual_session=merge_coords;
@@ -590,6 +623,8 @@ end % for ii=1:length(seg_size)
 end
 %Is there a sleep session?
 function sleep=sleep_question
+
+%Is there a sleep session?
 sleep = questdlg('Is a sleep session included?', ...                        % Create a question dialogue box
     'Sleep', '1 sleep session','Multiple sleep sessions','No','No');        % Default is no sleep sessions
 if strcmp(sleep, '1 sleep session')==1
@@ -603,11 +638,73 @@ end
 
 
 
+function [Set_Files]=set_files
+setfiles=dir('*.set');
+Set_Files=[];
+for i=1:length(setfiles)
+    setfile= setfiles(i).name;
+    delimiter = ' ';
+%% Format for each line of text:
+%   column1: text (%q)
+%	column2: text (%q)
+% For more information, see the TEXTSCAN documentation.
+formatSpec = '%q%q%[^\n\r]';
+
+%% Open the text file.
+fileID = fopen(setfile,'r');
+
+%% Read columns of data according to the format.
+% This call is based on the structure of the file used to generate this
+% code. If an error occurs for a different file, try regenerating the code
+% from the Import Tool.
+dataArray = textscan(fileID, formatSpec, 'Delimiter', delimiter,  'ReturnOnError', false);
+
+%% Close the text file.
+fclose(fileID);
+
+%% Create output variable
+Set_Files.(['file_' (num2str(setfile(1:9)))]) = [dataArray{1:end-1}];
+
+%% Clear temporary variables
+clearvars filename delimiter formatSpec fileID dataArray ans;
+
+end
+    
+end
 
 
 
+%Function to find the gain applied to each channel in a session 
+%need the input of the session_output variable, and the number of the
+%session being studied - can be part of a loop. 
 
-
+function gain_mat=gain_analysis(k, session_output)
+                                                                         
+temp=strfind(session_output.(['session_' num2str(k)]){1,1}, ...             % create a temporary variable the highlights the parts of the session output data that contains the word 'gain'
+    'gain','ForceCellOutput',true);
+    gain_index=[];                                                          % create a gain index matrix
+    for i=1:length(temp)                                                    % go through the temporary cell structure
+        if temp{i,1}==1
+            gain_index=[gain_index;i];                                      % add the location of the gain values, one by one
+        else
+            continue
+        end
+    end
+    
+    gain= (session_output.(['session_' num2str(k)]){1,1}(gain_index,2));    % use the previously defined gain index to find the gain at each part of the session output cell structure
+    gain_mat=NaN(length(gain),1);                                           % you want a matrix of the different gain values in the form of a double, not a characater, which you can now find from the index
+    for i=1:length(gain)                                                    % go through the gain structure
+        gain_mat(i,1)=str2double(gain{i,1});                                % do the string to double transformation
+    end
+    
+    p1=bar(gain_mat, 0.8,  'FaceColor', [0.3 0.5 1]);                       % plot a bar graph of the gain values across the channels
+    hold on
+    p2=plot([32.5 32.5],[0 max(gain_mat)+1000], 'r--', 'LineWidth', 3);     % plot a line to show the point of 32 channels
+    ylabel('Gain');    xlabel('Channels');                                  % add axis labels
+    xlim([0 length(gain)+1]);                                               % scale the x axis
+    legend([p2],{'32 Channels'}); legend boxoff;                            % add a legend to show the point of 32 channels
+ 
+end
 
 
 
